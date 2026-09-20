@@ -335,8 +335,11 @@ class J9ROMConstant:
                     value = stream.read_string()
             case ConstType.INT:
                 value = struct.pack("<I", value)
+            case ConstType.LONG:
+                value = struct.pack("<II", value, value_type)
+                value_type = ConstType.LONG
             case _:
-                stream_len = int(stream.len) // 8
+                stream_len = int(stream.len)
                 if class_count is not None and value >= class_count:
                     value = struct.pack("<II", value, value_type)
                     value_type = ConstType.LONG
