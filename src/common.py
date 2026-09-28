@@ -88,11 +88,9 @@ class ReaderStream:
             raise ValueError("invalid ROM string header")
         if length == 0:
             return ""
-        # decode_modified_utf8 raises UnicodeDecodeError, a ValueError subclass.
-        result = decode_modified_utf8(self.read_bytes(length))
-        if not _is_valid_string(result):
-            raise ValueError("ROM string does not look like text")
-        return result
+        # Control characters are valid string contents (including packed tables).
+        # The decoder validates the encoding before accepting the record.
+        return decode_modified_utf8(self.read_bytes(length))
 
     def _read_rom_string_at(self, pos: int, visited: set, debug=False):
         if pos in visited:
@@ -236,49 +234,39 @@ def create_file_path(filepath: str) -> None:
                 raise
 
 
-def _is_valid_string(s: str) -> bool:
-    """Check if a string is valid for use in constant pool (no excessive control chars)."""
-    if not s:
-        return True  # Empty string is valid
-
-    # Count null bytes and control characters
-    null_count = s.count('\x00')
-    control_count = sum(1 for c in s if ord(c) < 32 and c not in '\n\r\t')
-
-    # Reject if more than 10% null bytes or control chars
-    if null_count > len(s) * 0.1 or control_count > len(s) * 0.1:
-        return False
-
-    # Reject if string starts with null or control chars (common in corrupted data)
-    if s[0] in '\x00\x01\x02\x03\x04\x05\x06\x07\x08\x0b\x0c\x0e\x0f':
-        return False
-
-    return True
-
-
 def decode_modified_utf8(data: bytes) -> str:
-    """Decodes modified UTF-8 as used in Java class files."""
+    """Decode and validate the modified UTF-8 used in Java class files."""
     result = []
     idx = 0
     length = len(data)
     while idx < length:
         byte = data[idx]
-        if byte >> 7 == 0:
+        if 0 < byte < 0x80:
             result.append(chr(byte))
             idx += 1
         elif (byte & 0xE0) == 0xC0:
             if idx + 1 >= length:
-                raise UnicodeDecodeError("mutf8", data, idx, idx + 1, "truncated sequence")
+                raise UnicodeDecodeError("mutf8", data, idx, length, "truncated sequence")
             byte2 = data[idx + 1]
+            if (byte2 & 0xC0) != 0x80:
+                raise UnicodeDecodeError("mutf8", data, idx + 1, idx + 2, "invalid continuation byte")
             char = ((byte & 0x1F) << 6) | (byte2 & 0x3F)
+            if char < 0x80 and not (byte == 0xC0 and byte2 == 0x80):
+                raise UnicodeDecodeError("mutf8", data, idx, idx + 2, "overlong sequence")
             result.append(chr(char))
             idx += 2
         elif (byte & 0xF0) == 0xE0:
             if idx + 2 >= length:
-                raise UnicodeDecodeError("mutf8", data, idx, idx + 2, "truncated sequence")
+                raise UnicodeDecodeError("mutf8", data, idx, length, "truncated sequence")
             byte2 = data[idx + 1]
             byte3 = data[idx + 2]
+            if (byte2 & 0xC0) != 0x80:
+                raise UnicodeDecodeError("mutf8", data, idx + 1, idx + 2, "invalid continuation byte")
+            if (byte3 & 0xC0) != 0x80:
+                raise UnicodeDecodeError("mutf8", data, idx + 2, idx + 3, "invalid continuation byte")
             char = ((byte & 0x0F) << 12) | ((byte2 & 0x3F) << 6) | (byte3 & 0x3F)
+            if char < 0x800:
+                raise UnicodeDecodeError("mutf8", data, idx, idx + 3, "overlong sequence")
             result.append(chr(char))
             idx += 3
         else:
