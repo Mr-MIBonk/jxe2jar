@@ -1,6 +1,11 @@
 import struct
 from io import BytesIO, IOBase
 
+
+class ReadError(Exception):
+    """A read requested more data than the stream contains."""
+
+
 class BitArray:
     def __init__(self, bytes=None):
         if bytes is not None:
@@ -34,6 +39,7 @@ class BitStream:
 
     def append(self, obj):
         self._append(obj)
+        self.stream.seek(0, 2)
 
     @property
     def bytepos(self):
@@ -41,12 +47,25 @@ class BitStream:
 
     @bytepos.setter
     def bytepos(self, pos):
+        if pos < 0 or pos > len(self.stream.getbuffer()):
+            raise ValueError("Cannot seek past the end of the data")
         self.stream.seek(pos)
+
+    def _read_exact(self, size):
+        available = len(self.stream.getbuffer()) - self.stream.tell()
+        if size < 0:
+            raise ValueError("Negative read length")
+        if size > available:
+            raise ReadError(
+                f"Needed a length of at least {size * 8} bits, "
+                f"but only {available * 8} bits were available"
+            )
+        return self.stream.read(size)
 
     def read(self, fmt):
         if fmt.startswith("bytes:"):
             length = int(fmt.split(":")[1])
-            return self.stream.read(length)
+            return self._read_exact(length)
 
         sizes = {"8": 1, "16": 2, "32": 4}
         parts = fmt.split(":")
@@ -54,9 +73,7 @@ class BitStream:
         bits = parts[1]
 
         size = sizes[bits]
-        data = self.stream.read(size)
-        if len(data) < size:
-            raise EOFError
+        data = self._read_exact(size)
 
         if type_endian == "uintle":
             struct_fmt = "<" + {1: "B", 2: "H", 4: "I"}[size]
