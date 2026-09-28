@@ -24,6 +24,7 @@
  */
 import org.objectweb.asm.*;
 import org.objectweb.asm.tree.*;
+import org.objectweb.asm.tree.analysis.*;
 import java.io.*;
 import java.util.*;
 import java.util.zip.*;
@@ -172,6 +173,7 @@ public class Uninliner {
 
         // T1 closure map (accessible + meaningful + floor + closure-unique).
         Map<String, Ref> closure = closureMap(cn);
+        Set<AbstractInsnNode> bitmapLiterals = bitmapLiterals(node);
 
         // T3 evidence: public constant-bearing owners this class REFERENCES in any way
         // (supertype, field/method target, or a `new`/cast/instanceof type). "This class
@@ -192,7 +194,7 @@ public class Uninliner {
             for (AbstractInsnNode in=mn.instructions.getFirst(); in!=null; ) {
                 AbstractInsnNode next=in.getNext();
                 Lit L=litOf(in);
-                if (L!=null) {
+                if (L!=null && !bitmapLiterals.contains(in)) {
                     Ref r=null; int tier=-1;
                     // T1 closure-unique (strongest: actual simple-name scope)
                     r=closure.get(L.key); if(r!=null) tier=0;
@@ -240,6 +242,52 @@ public class Uninliner {
         if(!touched) return data;
         stats[3]++;
         ClassWriter cw=new ClassWriter(0); node.accept(cw); return cw.toByteArray();
+    }
+
+    // An int[] passed to setBitmaps carries bitmap resource IDs. Their numeric values
+    // can collide with unrelated model-bank constants, even when globally unique.
+    // Follow the array through DUP and local loads, then protect only its elements.
+    static Set<AbstractInsnNode> bitmapLiterals(ClassNode node) {
+        Set<AbstractInsnNode> protectedLiterals = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (MethodNode mn : node.methods) {
+            if (mn.instructions == null || mn.instructions.size() == 0) continue;
+            Frame<SourceValue>[] frames;
+            try {
+                frames = new Analyzer<>(new SourceInterpreter(Opcodes.ASM9) {
+                    @Override public SourceValue copyOperation(AbstractInsnNode insn, SourceValue value) {
+                        return value; // preserve NEWARRAY identity through DUP/ALOAD/ASTORE
+                    }
+                }).analyze(node.name, mn);
+            } catch (AnalyzerException ex) { continue; }
+
+            Map<AbstractInsnNode, Set<AbstractInsnNode>> elements = new IdentityHashMap<>();
+            AbstractInsnNode[] instructions = mn.instructions.toArray();
+            for (int i = 0; i < instructions.length; i++) {
+                if (instructions[i].getOpcode() != Opcodes.IASTORE || frames[i] == null) continue;
+                Frame<SourceValue> f = frames[i];
+                if (f.getStackSize() < 3) continue;
+                AbstractInsnNode array = soleSource(f.getStack(f.getStackSize() - 3));
+                AbstractInsnNode value = soleSource(f.getStack(f.getStackSize() - 1));
+                if (array instanceof IntInsnNode && array.getOpcode() == Opcodes.NEWARRAY
+                        && ((IntInsnNode) array).operand == Opcodes.T_INT && value != null && litOf(value) != null)
+                    elements.computeIfAbsent(array, k -> Collections.newSetFromMap(new IdentityHashMap<>())).add(value);
+            }
+            for (int i = 0; i < instructions.length; i++) {
+                if (!(instructions[i] instanceof MethodInsnNode) || frames[i] == null) continue;
+                MethodInsnNode call = (MethodInsnNode) instructions[i];
+                if (!call.name.equals("setBitmaps") || !call.desc.equals("([I)V")) continue;
+                Frame<SourceValue> f = frames[i];
+                if (f.getStackSize() < 1) continue;
+                AbstractInsnNode array = soleSource(f.getStack(f.getStackSize() - 1));
+                Set<AbstractInsnNode> values = elements.get(array);
+                if (values != null) protectedLiterals.addAll(values);
+            }
+        }
+        return protectedLiterals;
+    }
+
+    static AbstractInsnNode soleSource(SourceValue value) {
+        return value != null && value.insns.size() == 1 ? value.insns.iterator().next() : null;
     }
 
     // T1: value unique among accessible (self|public) meaningful constants in cn's closure, past floor.

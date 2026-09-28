@@ -52,7 +52,10 @@ $U audit    out/final.jar                       # type-ambiguity / jsr / utf-8 a
 ## Guarantees
 
 - **100% value-correct** - a getstatic reads exactly the literal's value (`VerifyResolve` proves it).
-- **~99.98% name-correct** - the ~0.02% low-confidence collisions are reverted to honest numbers;
-  `RefineResolve` emits them to `doubtful.tsv` as a QA sidecar for manual review.
+- **Names are heuristic** - equal values can belong to different domains. `RefineResolve`
+  reverts some doubtful matches and records them in `doubtful.tsv`; the value check
+  cannot prove that a recovered name is semantically correct.
 - **Decompile-only** - a `getstatic` can trigger class init, so the jar is a reading aid, not
   runnable bytecode.
+- Bitmap resource IDs inside an `int[]` passed to `setBitmaps(int[])` remain numeric.
+  A model-bank constant with the same value does not establish the bitmap's name.
