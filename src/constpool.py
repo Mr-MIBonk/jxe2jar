@@ -93,8 +93,9 @@ class ConstPool:
         base = getattr(romclass, "rom_base", None)
         if None in (value, value_type, pos, base):
             return None
-        class_count = getattr(romclass, "class_count", None)
-        if class_count is not None and (value < 0 or value >= class_count):
+        if value < 0:
+            return None
+        if value_type != 4:
             return None
         stream = romclass.rom_stream
         stream_len = int(stream.len)
