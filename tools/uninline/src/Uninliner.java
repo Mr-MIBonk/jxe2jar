@@ -2,8 +2,9 @@
  * ASM constant un-inliner (Layers 1-3) - all constant types, tiered resolution.
  *
  * javac inlines `static final` constants at the use site (drops NAME, keeps VALUE).
- * We recover the name and rewrite the literal-load into `getstatic Owner.FIELD:desc`,
- * so a re-decompile shows the real symbolic reference (no regex/text matching).
+ * We infer a candidate name and rewrite the literal-load into
+ * `getstatic Owner.FIELD:desc`, so a re-decompile shows a symbolic reference.
+ * Equal values alone cannot prove the original source name.
  *
  * Resolution is tiered; first tier that yields exactly ONE candidate wins, and the
  * reason is auditable (never a fuzzy score):
@@ -43,11 +44,16 @@ public class Uninliner {
     static final Map<String, Map<String, List<Ref>>> ownerPub = new HashMap<>(); // T3: owner -> key -> refs
     static final Set<String> constFieldSig = new HashSet<>();                 // "owner\0name\0desc"
     static int floor = 100;
+    static boolean scoped = false;
     static final long[] stats = new long[4];   // T1, T3, T2, classes
 
     public static void main(String[] args) throws Exception {
         String inJar = args[0], outJar = args[1];
         if (args.length > 2) floor = Integer.parseInt(args[2]);
+        if (args.length > 3) {
+            if (!"--scoped".equals(args[3])) throw new IllegalArgumentException("unknown option: " + args[3]);
+            scoped = true;
+        }
 
         try (ZipFile zf = new ZipFile(inJar)) {
             for (Enumeration<? extends ZipEntry> e = zf.entries(); e.hasMoreElements(); ) {
@@ -174,6 +180,7 @@ public class Uninliner {
         // T1 closure map (accessible + meaningful + floor + closure-unique).
         Map<String, Ref> closure = closureMap(cn);
         Set<AbstractInsnNode> bitmapLiterals = bitmapLiterals(node);
+        Set<AbstractInsnNode> labelIdLiterals = labelIdLiterals(node);
 
         // T3 evidence: public constant-bearing owners this class REFERENCES in any way
         // (supertype, field/method target, or a `new`/cast/instanceof type). "This class
@@ -199,7 +206,7 @@ public class Uninliner {
                     // T1 closure-unique (strongest: actual simple-name scope)
                     r=closure.get(L.key); if(r!=null) tier=0;
                     // T2 global-unique + distinctive (high-confidence cross-scope)
-                    if(r==null){
+                    if(r==null && !scoped){
                         List<Ref> g=globalPub.get(L.key);
                         if(g!=null && g.size()==1){
                             boolean ok = L.cat=='s' ? distinctiveStr(L.str)
@@ -214,7 +221,7 @@ public class Uninliner {
                     // 71 constants) get mislabeled just because the owner is referenced.
                     // Recovering non-distinctive cross-scope constants needs sink-domain
                     // dataflow (T3b, not done here) - co-reference alone is insufficient.
-                    if(r==null && !corefOwners.isEmpty()){
+                    if(r==null && !scoped && !corefOwners.isEmpty()){
                         boolean dist = L.cat=='s' ? distinctiveStr(L.str)
                                      : (L.cat=='i'||L.cat=='j') ? distinctiveNum(L.num) : false;
                         if(dist){
@@ -231,6 +238,11 @@ public class Uninliner {
                             if(cand!=null && !amb){ r=cand; tier=1; }
                         }
                     }
+                    // A label resource ID can share its number with a model-bank
+                    // constant. The value alone must not turn setLabelId(602633)
+                    // into an unrelated *_CHOICE or *_BUTTON reference.
+                    if(r!=null && labelIdLiterals.contains(in)
+                            && !r.name.toUpperCase(Locale.ROOT).endsWith("_LABEL")) r=null;
                     if(r!=null){
                         mn.instructions.set(in, new FieldInsnNode(Opcodes.GETSTATIC, r.owner, r.name, r.desc));
                         stats[tier]++; touched=true;
@@ -288,6 +300,43 @@ public class Uninliner {
 
     static AbstractInsnNode soleSource(SourceValue value) {
         return value != null && value.insns.size() == 1 ? value.insns.iterator().next() : null;
+    }
+
+    static Set<AbstractInsnNode> labelIdLiterals(ClassNode node) {
+        Set<AbstractInsnNode> labels = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (MethodNode mn : node.methods) {
+            if (mn.instructions == null || mn.instructions.size() == 0) continue;
+            boolean hasLabelCall = false;
+            for (AbstractInsnNode in = mn.instructions.getFirst(); in != null; in = in.getNext()) {
+                if (in instanceof MethodInsnNode) {
+                    MethodInsnNode call = (MethodInsnNode) in;
+                    if (call.name.equals("setLabelId") && call.desc.equals("(I)V")) {
+                        hasLabelCall = true;
+                        break;
+                    }
+                }
+            }
+            if (!hasLabelCall) continue;
+            Frame<SourceValue>[] frames;
+            try {
+                frames = new Analyzer<>(new SourceInterpreter(Opcodes.ASM9) {
+                    @Override public SourceValue copyOperation(AbstractInsnNode insn, SourceValue value) {
+                        return value;
+                    }
+                }).analyze(node.name, mn);
+            } catch (AnalyzerException ex) { continue; }
+            AbstractInsnNode[] instructions = mn.instructions.toArray();
+            for (int i = 0; i < instructions.length; i++) {
+                if (!(instructions[i] instanceof MethodInsnNode) || frames[i] == null) continue;
+                MethodInsnNode call = (MethodInsnNode) instructions[i];
+                if (!call.name.equals("setLabelId") || !call.desc.equals("(I)V")) continue;
+                Frame<SourceValue> f = frames[i];
+                if (f.getStackSize() < 1) continue;
+                AbstractInsnNode value = soleSource(f.getStack(f.getStackSize() - 1));
+                if (value != null && litOf(value) != null) labels.add(value);
+            }
+        }
+        return labels;
     }
 
     // T1: value unique among accessible (self|public) meaningful constants in cn's closure, past floor.

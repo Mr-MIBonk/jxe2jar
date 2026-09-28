@@ -23,8 +23,8 @@ what the ROM erased for good (real local names, line numbers).
 
 Two independent halves: **converter** (`src/`, JXE -> verifiable `.jar`) and **recovery +
 decompile** (`tools/`, `.jar` -> readable Java). The un-inliner sits *between* conversion
-and decompilation - it rewrites folded literals back into `getstatic Owner.FIELD` so the
-decompiler prints the real name, 100 % value-verified. End-to-end, one image:
+and decompilation - it rewrites selected folded literals into `getstatic Owner.FIELD` so the
+decompiler prints candidate names whose values are verified. End-to-end, one image:
 
 ```sh
 tools/uninline/build.sh                                                     # once (JDK 17+)
@@ -75,10 +75,10 @@ instead of a wall of magic numbers.
    tools/uninline/uninline.sh pipeline out/combined.jar out/final.jar out/doubtful.tsv 100
    ```
    `javac` folds `static final` constants into raw literals, so a naive decompile shows
-   `getChoiceModel(402127)` instead of the symbolic name. This pipeline rewrites each literal
-   load back into a `getstatic Owner.FIELD` (value-preserving, decompile-only), so Vineflower
-   then prints the real reference - **no regex over source text**. Every rewrite is proven
-   `value(F) == literal` (0 mismatches on 106 k replacements). Full detail:
+   `getChoiceModel(402127)` instead of a symbolic name. This pipeline rewrites selected literal
+   loads into `getstatic Owner.FIELD` (value-preserving, decompile-only), so Vineflower
+   then prints candidate names - **no regex over source text**. Every rewrite is proven
+   `value(F) == literal` (0 mismatches on 105,200 balanced replacements in MU1316). Full detail:
    [Constant un-inlining (ASM)](#constant-un-inlining-asm---recover-inlined-static-final-names).
 
 4. **Decompile** with Vineflower:
@@ -122,9 +122,15 @@ constant references, and hex bitmasks.
 
 `javac` folds `static final` constants into raw literals, so decompiled code shows
 `getChoiceModel(402127)` instead of the symbolic name. The **[`tools/uninline/`](tools/uninline/)**
-suite (self-contained ASM fat jar) rewrites the literal-load back into a `getstatic Owner.FIELD`,
-so a re-decompile renders the real reference - **no regex on source text**. Every rewrite is
-value-preserving (`VerifyResolve` proves `value(F)==literal`) and decompile-only.
+suite (self-contained ASM fat jar) can rewrite a literal-load into a candidate
+`getstatic Owner.FIELD`, so a re-decompile renders a symbolic name - **no regex on source
+text**. Every rewrite is value-preserving (`VerifyResolve` proves `value(F)==literal`)
+and decompile-only, but equal values do not prove that the name was in the original source.
+The default `pipeline` first learns call-argument domains from field references already
+present in the input, then recovers candidate names across the corpus. It keeps bitmap
+arrays numeric and requires a label-related name at `setLabelId(int)` call sites.
+Use `scoped-pipeline` when an audit calls for fewer inferred names; the older,
+more aggressive pass order remains available as `heuristic-pipeline`.
 
 ```mermaid
 flowchart LR
@@ -228,9 +234,10 @@ python3 tools/nav_index.py  out/final.jar out/nav                          # nav
 # QA (optional):  tools/uninline/uninline.sh audit out/final.jar
 ```
 
-On MU1316: **106014 literal->getstatic replacements, 0 value-mismatches**; ~95 % high-confidence
-(globally-unique / own-class / distinctive), ~4.6 % flagged REVIEW, ~0.02 % genuine collisions
-reverted to honest numbers (listed in `doubtful.tsv` for review). See
+On MU1316 with the default balanced pipeline: **105200 literal->getstatic replacements,
+0 value-mismatches**. The scoped pipeline recovered 38205; the earlier heuristic
+pipeline recovered 108609. These checks
+verify values, not semantic name correctness. See
 [`tools/uninline/README.md`](tools/uninline/README.md) for per-tool commands and guarantees.
 
 ## Decompiler reference

@@ -51,10 +51,10 @@ public class VerifyResolve {
         System.out.println("methods with instruction-count anomaly: "+structAnomaly);
         System.out.println("other unexpected divergences: "+otherDiverge);
         for(String s: mism.subList(0, Math.min(mism.size(),15))) System.out.println("  MISMATCH "+s);
-        System.out.println("\n--- NAME-PROVENANCE AUDIT (all value-correct) ---");
-        System.out.println("  SAFE  globally-unique value : "+safeUnique);
-        System.out.println("  SAFE  own-class constant     : "+safeSelf);
-        System.out.println("  SAFE  distinctive value     : "+safeDistinct);
+        System.out.println("\n--- NAME-CANDIDATE AUDIT (values correct; names unverified) ---");
+        System.out.println("  globally-unique value : "+safeUnique);
+        System.out.println("  own-class candidate   : "+safeSelf);
+        System.out.println("  distinctive value     : "+safeDistinct);
         System.out.println("  REVIEW non-distinct+ambiguous: "+review+"   ("+String.format("%.1f",100.0*review/Math.max(1,valueMatch))+"% of resolutions)");
         System.out.println("  review samples:");
         for(String s: reviewSamples) System.out.println("    "+s);

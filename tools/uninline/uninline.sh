@@ -12,10 +12,18 @@ case "$cmd" in
   access)   run AccessInline "$@" ;;   # <in.jar> <out.jar>          (inline access$NNN)
   verify)   run VerifyResolve "$@" ;;  # <orig.jar> <uninlined.jar>  (0 value-mismatch)
   audit)    run TypeAudit    "$@" ;;   # <jar>                       (type-ambiguity audit)
-  pipeline)                            # <base.jar> <out.jar> <doubtful.tsv> [floor]
+  heuristic-pipeline)                  # <base.jar> <out.jar> <doubtful.tsv> [floor]
     b="$1"; o="$2"; d="$3"; f="${4:-100}"; t="$(mktemp -d)"
     run Uninliner "$b" "$t/u.jar" "$f" && run SinkResolve "$t/u.jar" "$t/s.jar" "$f" \
       && run RefineResolve "$t/s.jar" "$t/r.jar" "$d" && run AccessInline "$t/r.jar" "$o"
     rc=$?; rm -rf "$t"; exit $rc ;;
-  *) echo "usage: uninline.sh {uninline|sink|refine|access|verify|audit|pipeline} <args>"; exit 1 ;;
+  pipeline|scoped-pipeline)            # <base.jar> <out.jar> <doubtful.tsv> [floor]
+    b="$1"; o="$2"; d="$3"; f="${4:-100}"; t="$(mktemp -d)"
+    # Learn sink domains only from field references already present in the input.
+    # Then recover names; inferred names cannot seed the sink pass.
+    mode=(); [ "$cmd" = scoped-pipeline ] && mode=(--scoped)
+    run SinkResolve "$b" "$t/s.jar" "$f" && run Uninliner "$t/s.jar" "$t/u.jar" "$f" "${mode[@]}" \
+      && run RefineResolve "$t/u.jar" "$t/r.jar" "$d" && run AccessInline "$t/r.jar" "$o"
+    rc=$?; rm -rf "$t"; exit $rc ;;
+  *) echo "usage: uninline.sh {uninline|sink|refine|access|verify|audit|pipeline|scoped-pipeline|heuristic-pipeline} <args>"; exit 1 ;;
 esac

@@ -24,7 +24,7 @@ flowchart LR
 | [`decompile_fallback.py`](#decompile_fallbackpy) | repair | re-decompile VF stubs with CFR |
 | [`fix_vf_artifacts.py`](#fix_vf_artifactspy) | repair | fix `<unrepresentable>` / keyword-identifier artifacts |
 | [`int2hex.py`](#int2hexpy) | repair | decimal bitmasks/flags -> hex |
-| [`foreach1_4/`](#foreach1_4) | repair | indexed `for` loops -> enhanced for-each (javaparser) |
+| [`foreach1_4/`](#foreach1_4) | repair | enhanced for-each -> Java 1.4 loops (javaparser) |
 | [`nav_index.py`](#nav_indexpy) | analysis | "what is value N" / "who uses this constant" index |
 | [`xref.py`](#xrefpy) | analysis | bytecode cross-reference (callers/uses/dump) |
 | [`recompile_check.py`](#recompile_checkpy) | QA | round-trip gate: does the decompiled source recompile? |
@@ -53,14 +53,16 @@ tools/combine.sh out/base.jar out/combined.jar "$APPIMG/eso/bundles" "$APPIMG/es
 
 The headline step: `javac` folds `static final` constants into raw literals, so a naive
 decompile shows `getChoiceModel(402127)` instead of the symbolic name. The `uninline/` suite
-rewrites each literal load back into `getstatic Owner.FIELD` at the **bytecode** level
-(value-preserving, 100 % verified), so the decompiler prints the real name. Run it on the
+can rewrite a literal load into a candidate `getstatic Owner.FIELD` at the **bytecode** level.
+The value check verifies equality, but cannot establish the original source name. Run it on the
 converted jar **before** Vineflower. Full detail - tiers, QA, guarantees - in
 **[`uninline/README.md`](uninline/README.md)**.
 
 ```sh
 tools/uninline/build.sh                                                  # build once (JDK 17+)
-tools/uninline/uninline.sh pipeline base.jar final.jar doubtful.tsv 100  # T1/T2/T3a->sink->refine->access
+tools/uninline/uninline.sh pipeline base.jar final.jar doubtful.tsv 100  # sink->T1/T2/T3a->refine->access
+tools/uninline/uninline.sh scoped-pipeline base.jar scoped.jar scoped.tsv 100  # fewer inferred names
+tools/uninline/uninline.sh heuristic-pipeline base.jar legacy.jar legacy.tsv 100  # broader name guesses
 tools/uninline/uninline.sh verify   base.jar final.jar                   # 0 value-mismatch
 tools/uninline/uninline.sh audit    final.jar                            # type-ambiguity audit
 ```
@@ -143,13 +145,13 @@ python3 tools/int2hex.py out/final-vf --report report.csv       # CSV for manual
 ```
 
 ### `foreach1_4`
-Java 1.4 has no enhanced `for`, so loops decompile as indexed `for (int i=0; i<n; i++)` /
-`Iterator` boilerplate. `RewriteForeach` (javaparser + symbol-solver, bundled jars in the dir)
-rewrites them to `for (T x : coll)` where provably equivalent. Source-level, scoped by
-`scope.txt`. Cosmetic - readability only, does not affect correctness.
+Vineflower sometimes emits Java 5 enhanced `for` loops for Java 1.4 bytecode.
+`RewriteForeach` (javaparser + symbol-solver, bundled jars in the dir) rewrites
+selected source files to indexed array loops or `Iterator` loops. It edits the files
+in place; recompile the result and review unresolved type fallbacks before use.
 
 ```sh
-java -cp "tools/foreach1_4/*:tools/foreach1_4" RewriteForeach <src-dir>
+java -cp "tools/foreach1_4/*:tools/foreach1_4" RewriteForeach final.jar libs path/to/File.java
 ```
 
 ---

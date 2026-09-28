@@ -24,8 +24,15 @@ tools/uninline/build.sh          # needs JDK 17+ (produces uninline.jar)
 ```sh
 U=tools/uninline/uninline.sh
 
-# full pipeline: base.jar -> recovered.jar (+ doubtful.tsv QA sidecar)
+# default balanced pipeline: seed sink domains from original field references,
+# then recover closure/global/co-reference names with resource-argument guards
 $U pipeline out/base.jar out/final.jar out/doubtful.tsv 100
+
+# conservative mode: closure names only after original-reference sink resolution
+$U scoped-pipeline out/base.jar out/scoped-final.jar out/scoped-doubtful.tsv 100
+
+# legacy, more aggressive order (inferred names can seed sink resolution)
+$U heuristic-pipeline out/base.jar out/heuristic-final.jar out/heuristic-doubtful.tsv 100
 
 # or step by step:
 $U uninline out/base.jar      out/u.jar 100     # T1 closure / T2 global-distinctive / T3a co-ref
@@ -59,3 +66,7 @@ $U audit    out/final.jar                       # type-ambiguity / jsr / utf-8 a
   runnable bytecode.
 - Bitmap resource IDs inside an `int[]` passed to `setBitmaps(int[])` remain numeric.
   A model-bank constant with the same value does not establish the bitmap's name.
+- A `setLabelId(int)` argument is only given a field name ending in `_LABEL`.
+- The default `pipeline` still makes global-unique-value and co-reference guesses.
+  `scoped-pipeline` omits those tiers, preserving many more numeric literals for
+  audits. Neither mode proves original source names from bytecode values alone.
