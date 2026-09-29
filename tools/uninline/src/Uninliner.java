@@ -179,7 +179,7 @@ public class Uninliner {
 
         // T1 closure map (accessible + meaningful + floor + closure-unique).
         Map<String, Ref> closure = closureMap(cn);
-        Set<AbstractInsnNode> bitmapLiterals = bitmapLiterals(node);
+        Set<AbstractInsnNode> resourceArrayLiterals = resourceArrayLiterals(node);
         Set<AbstractInsnNode> labelIdLiterals = labelIdLiterals(node);
 
         // T3 evidence: public constant-bearing owners this class REFERENCES in any way
@@ -201,7 +201,7 @@ public class Uninliner {
             for (AbstractInsnNode in=mn.instructions.getFirst(); in!=null; ) {
                 AbstractInsnNode next=in.getNext();
                 Lit L=litOf(in);
-                if (L!=null && !bitmapLiterals.contains(in)) {
+                if (L!=null && !resourceArrayLiterals.contains(in)) {
                     Ref r=null; int tier=-1;
                     // T1 closure-unique (strongest: actual simple-name scope)
                     r=closure.get(L.key); if(r!=null) tier=0;
@@ -256,10 +256,10 @@ public class Uninliner {
         ClassWriter cw=new ClassWriter(0); node.accept(cw); return cw.toByteArray();
     }
 
-    // An int[] passed to setBitmaps carries bitmap resource IDs. Their numeric values
-    // can collide with unrelated model-bank constants, even when globally unique.
+    // int[] values passed to setBitmaps/setTextIds carry resource IDs. Their numeric
+    // values can collide with unrelated model-bank constants, even when globally unique.
     // Follow the array through DUP and local loads, then protect only its elements.
-    static Set<AbstractInsnNode> bitmapLiterals(ClassNode node) {
+    static Set<AbstractInsnNode> resourceArrayLiterals(ClassNode node) {
         Set<AbstractInsnNode> protectedLiterals = Collections.newSetFromMap(new IdentityHashMap<>());
         for (MethodNode mn : node.methods) {
             if (mn.instructions == null || mn.instructions.size() == 0) continue;
@@ -287,7 +287,8 @@ public class Uninliner {
             for (int i = 0; i < instructions.length; i++) {
                 if (!(instructions[i] instanceof MethodInsnNode) || frames[i] == null) continue;
                 MethodInsnNode call = (MethodInsnNode) instructions[i];
-                if (!call.name.equals("setBitmaps") || !call.desc.equals("([I)V")) continue;
+                if ((!call.name.equals("setBitmaps") && !call.name.equals("setTextIds"))
+                        || !call.desc.equals("([I)V")) continue;
                 Frame<SourceValue> f = frames[i];
                 if (f.getStackSize() < 1) continue;
                 AbstractInsnNode array = soleSource(f.getStack(f.getStackSize() - 1));

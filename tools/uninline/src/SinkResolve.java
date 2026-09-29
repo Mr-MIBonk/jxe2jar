@@ -13,9 +13,10 @@
  *   - switch-on-param  a switch whose keys match owner O's constant set, over a value
  *                      loaded directly from method parameter p -> that (method,p) slot = O
  *
- * A slot is trusted when >=2 distinct constants from a SINGLE owner back it. Then a
- * NON-distinctive literal (past floor) flowing into that slot is rewritten to
- * getstatic of the owner's uniquely-matching constant.
+ * A slot is normally trusted when >=2 distinct constants from a SINGLE owner back it.
+ * The three-argument createMenuEntry availability slot also accepts an overwhelming
+ * owner majority and uses the adjacent entry name to correct conflicting field names.
+ * A literal flowing into a trusted slot is rewritten only to a unique owner constant.
  *
  * FIXPOINT: each resolve pass adds getstatic refs, which seed more slots; iterate
  * learn+resolve until no new rewrites (monotonic - only facts added). Return-value
@@ -40,6 +41,7 @@ public class SinkResolve {
     // learned domains (rebuilt each iteration, monotonic):
     static final Map<String, String> sinkOwner = new HashMap<>();                 // call-arg / switch-param slot -> owner
     static final Map<String, String> fieldOwner = new HashMap<>();                // field slot -> owner
+    static final Set<String> menuDominant = new HashSet<>();
     static int floor = 100;
 
     public static void main(String[] args) throws Exception {
@@ -63,8 +65,9 @@ public class SinkResolve {
             for (Map.Entry<String,byte[]> e : classes.entrySet())
                 if (e.getKey().endsWith(".class"))
                     try { learn(e.getValue(), callSeeds, fieldSeeds); } catch(Exception ig){}
-            sinkOwner.clear(); fieldOwner.clear();
+            sinkOwner.clear(); fieldOwner.clear(); menuDominant.clear();
             coherent(callSeeds, sinkOwner);
+            coherentMenu(callSeeds, sinkOwner);
             coherent(fieldSeeds, fieldOwner);
 
             long r = 0;
@@ -101,7 +104,8 @@ public class SinkResolve {
         Map<String, Map<String,Set<String>>> callSeeds=new HashMap<>(), fieldSeeds=new HashMap<>();
         for (Map.Entry<String,byte[]> e: classes.entrySet())
             if (e.getKey().endsWith(".class")) try { learn(e.getValue(), callSeeds, fieldSeeds); } catch(Exception ig){}
-        coherent(callSeeds, sinkOwner); coherent(fieldSeeds, fieldOwner);
+        coherent(callSeeds, sinkOwner); coherentMenu(callSeeds, sinkOwner);
+        coherent(fieldSeeds, fieldOwner);
         List<String> calls=new ArrayList<>(sinkOwner.keySet()); Collections.sort(calls);
         List<String> flds=new ArrayList<>(fieldOwner.keySet()); Collections.sort(flds);
         try (PrintWriter w=new PrintWriter(new FileWriter(outMd))) {
@@ -126,6 +130,25 @@ public class SinkResolve {
             if (byOwner.size() != 1) continue;                       // ambiguous -> skip
             Map.Entry<String,Set<String>> only = byOwner.entrySet().iterator().next();
             if (only.getValue().size() >= 2) out.put(e.getKey(), only.getKey());
+        }
+    }
+
+    // createMenuEntry(id, name, availability) has two unrelated int registries.
+    // A few coincidental matches in the ID registry can poison the availability
+    // slot; accept its dominant family only with overwhelming independent seeds.
+    static void coherentMenu(Map<String, Map<String,Set<String>>> seeds, Map<String,String> out) {
+        for (Map.Entry<String, Map<String,Set<String>>> e : seeds.entrySet()) {
+            if (!e.getKey().contains(".createMenuEntry(ILjava/lang/String;I)")
+                    || !e.getKey().endsWith("#2") || e.getValue().size()<2) continue;
+            String best = null; int bestSize = 0, otherSize = 0;
+            for (Map.Entry<String,Set<String>> owner : e.getValue().entrySet()) {
+                int size = owner.getValue().size();
+                if (size > bestSize) { otherSize = bestSize; bestSize = size; best = owner.getKey(); }
+                else otherSize = Math.max(otherSize, size);
+            }
+            if (bestSize >= 8 && bestSize >= 4 * otherSize) {
+                out.put(e.getKey(), best); menuDominant.add(e.getKey());
+            }
         }
     }
 
@@ -258,12 +281,22 @@ public class SinkResolve {
                 if(in instanceof MethodInsnNode){
                     MethodInsnNode call=(MethodInsnNode)in; Type[] at=Type.getArgumentTypes(call.desc);
                     int base=f.getStackSize()-at.length;
+                    boolean menu = call.name.equals("createMenuEntry") && at.length==3
+                            && at[0].getDescriptor().equals("I")
+                            && at[1].getDescriptor().equals("Ljava/lang/String;")
+                            && at[2].getDescriptor().equals("I");
+                    String menuName = menu ? stringArgument(f, base+1) : null;
                     for(int a=0;a<at.length;a++){
-                        String owner=sinkOwner.get(call.owner+"."+call.name+call.desc+"#"+a); if(owner==null) continue;
+                        String slot=call.owner+"."+call.name+call.desc+"#"+a;
+                        String owner=sinkOwner.get(slot); if(owner==null) continue;
                         // Resource label IDs can collide with non-label constants.
                         // Match Uninliner's setLabelId safeguard on the late pass.
                         boolean labelId = call.name.equals("setLabelId") && call.desc.equals("(I)V") && a==0;
-                        planLiteral(f, base+a, owner, labelId, plan, conflict);
+                        if (menu && menuName!=null && a==0)
+                            planMenuId(f, base+a, owner, menuName, plan, conflict);
+                        else if (menu && menuName!=null && a==2 && menuDominant.contains(slot))
+                            planMenuAvailability(f, base+a, owner, menuName, plan, conflict);
+                        else planLiteral(f, base+a, owner, labelId, plan, conflict);
                     }
                 } else if(in.getOpcode()==Opcodes.PUTFIELD || in.getOpcode()==Opcodes.PUTSTATIC){
                     FieldInsnNode fi=(FieldInsnNode)in;
@@ -291,6 +324,57 @@ public class SinkResolve {
         Ref r=ls.get(0); if(!meaningful(r.name)) return;
         if(labelId && !r.name.toUpperCase(Locale.ROOT).endsWith("_LABEL")) return;
         if(plan.containsKey(p) && !same(plan.get(p),r)) conflict.add(p); else plan.put(p,r);
+    }
+    static String stringArgument(Frame<SourceValue> f, int stackIdx) {
+        try {
+            AbstractInsnNode p=sole(f.getStack(stackIdx));
+            if (p instanceof LdcInsnNode && ((LdcInsnNode)p).cst instanceof String)
+                return ((String)((LdcInsnNode)p).cst).replaceFirst("[^A-Za-z0-9_]+$", "");
+        } catch(Exception ig) {}
+        return null;
+    }
+    static Ref unique(String owner, String key) {
+        Map<String,List<Ref>> m=ownerPub.get(owner); if(m==null) return null;
+        List<Ref> ls=m.get(key); return ls!=null && ls.size()==1 ? ls.get(0) : null;
+    }
+    static void addPlan(AbstractInsnNode p, Ref r, Map<AbstractInsnNode,Ref> plan,
+                        Set<AbstractInsnNode> conflict) {
+        if(plan.containsKey(p) && !same(plan.get(p),r)) conflict.add(p); else plan.put(p,r);
+    }
+    static void planMenuId(Frame<SourceValue> f, int stackIdx, String owner, String menuName,
+                           Map<AbstractInsnNode,Ref> plan, Set<AbstractInsnNode> conflict) {
+        AbstractInsnNode p; try { p=sole(f.getStack(stackIdx)); } catch(Exception e) { return; }
+        if(p==null) return;
+        String key=litKey(p); if(key==null) return;
+        Ref r=unique(owner,key);
+        // Only the adjacent name can justify lifting the global small-number floor.
+        if(r!=null && r.name.equals(menuName)) addPlan(p,r,plan,conflict);
+        else planLiteral(f,stackIdx,owner,false,plan,conflict);
+    }
+    static boolean menuTokenMatch(String menuName, String constantName) {
+        if(constantName.startsWith(menuName+"_")) return true;
+        for(String token : menuName.split("_")) {
+            if(token.length()<3 || token.equals("CAR") || token.equals("MAIN")
+                    || token.equals("MENU") || token.equals("FUNC") || token.equals("AUX")) continue;
+            for(String candidate : constantName.split("_")) if(token.equals(candidate)) return true;
+        }
+        return false;
+    }
+    static void planMenuAvailability(Frame<SourceValue> f, int stackIdx, String owner, String menuName,
+                                     Map<AbstractInsnNode,Ref> plan, Set<AbstractInsnNode> conflict) {
+        AbstractInsnNode p; try { p=sole(f.getStack(stackIdx)); } catch(Exception e) { return; }
+        if(p==null) return;
+        String key=litKey(p);
+        boolean literal=key!=null;
+        if(key==null && isConstGetStatic(p)) {
+            FieldInsnNode g=(FieldInsnNode)p;
+            if(g.owner.equals(owner) || menuTokenMatch(menuName,g.name)) return;
+            for(Map.Entry<String,List<Ref>> e:ownerPub.getOrDefault(g.owner,Collections.emptyMap()).entrySet())
+                for(Ref old:e.getValue()) if(old.name.equals(g.name) && old.desc.equals(g.desc)) key=e.getKey();
+        }
+        if(key==null) return;
+        Ref r=unique(owner,key);
+        if(r!=null && (literal || menuTokenMatch(menuName,r.name))) addPlan(p,r,plan,conflict);
     }
     static boolean same(Ref a, Ref b){ return a.owner.equals(b.owner)&&a.name.equals(b.name)&&a.desc.equals(b.desc); }
 

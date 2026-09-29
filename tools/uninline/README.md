@@ -64,9 +64,14 @@ $U audit    out/final.jar                       # type-ambiguity / jsr / utf-8 a
   cannot prove that a recovered name is semantically correct.
 - **Decompile-only** - a `getstatic` can trigger class init, so the jar is a reading aid, not
   runnable bytecode.
-- Bitmap resource IDs inside an `int[]` passed to `setBitmaps(int[])` remain numeric.
-  A model-bank constant with the same value does not establish the bitmap's name.
+- Resource IDs inside an `int[]` passed to `setBitmaps(int[])` or `setTextIds(int[])`
+  remain numeric. A model-bank constant with the same value does not establish
+  the resource's name.
 - A `setLabelId(int)` argument is only given a field name ending in `_LABEL`.
+- In `createMenuEntry(int, String, int)`, a strongly supported availability
+  constant family resolves the third argument; the adjacent name must match
+  before correcting a conflicting field reference. Small first-argument IDs
+  require an exact match with that name.
 - The default `pipeline` still makes global-unique-value and co-reference guesses.
   `scoped-pipeline` omits those tiers, preserving many more numeric literals for
   audits. Neither mode proves original source names from bytecode values alone.
