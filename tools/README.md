@@ -83,7 +83,10 @@ uses the `jad` variable renamer, and auto-adds `libs/*.jar` as `--add-external` 
 bash tools/vineflower.sh final.jar                 # -> final-vf/  (sibling dir)
 bash tools/vineflower.sh final.jar out/custom-dir  # custom output dir
 VINEFLOWER_JAVA=/path/to/java17/bin/java bash tools/vineflower.sh final.jar   # pin the JDK17+
+VF_DECOMPILE_GENERICS=false bash tools/vineflower.sh final.jar out/java4-vf
 ```
+
+The wrapper propagates the decompiler's failure status through its log pipeline.
 
 Why these choices (both decide the stub count on J9-converted classes):
 - `--variable-renaming=jad`, **not** `tiny` - `TinyNameProvider` NPEs during LVT renaming.

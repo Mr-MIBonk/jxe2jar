@@ -50,7 +50,7 @@ $U audit    out/final.jar                       # type-ambiguity / jsr / utf-8 a
 | command  | class          | what it does |
 |----------|----------------|--------------|
 | uninline | `Uninliner`    | rewrite literal-loads to `getstatic Owner.FIELD` for all constant types, tiered: T1 closure-unique, T2 global-unique+distinctive, T3a co-reference+distinctive. |
-| sink     | `SinkResolve`  | T3b - learn each `(callee,method,argIndex)` slot's constant family from surviving getstatic args (self-seeded), resolve non-distinctive literals flowing into a learned slot. Fixpoint + field/switch domains. `--domains <md>` dumps the map. |
+| sink     | `SinkResolve`  | T3b - learn each `(callee,method,argIndex)` slot's constant family from surviving getstatic args, resolve non-distinctive literals flowing into a learned slot. The default pipeline runs it before and after `Uninliner`; the second pass can use recovered names as seeds. Fixpoint + field/switch domains. `--domains <md>` dumps the map. |
 | refine   | `RefineResolve`| three-way QA: KEEP (family-cohesion / distinctiveness / lexical name-context), REVERT genuine collisions to honest numbers, FLAG the rest (-> `doubtful.tsv` QA sidecar of low-confidence resolutions). |
 | access   | `AccessInline` | inline synthetic `access$NNN` accessors to the real field/method access (reads the body, stack-guarded). |
 | verify   | `VerifyResolve`| instruction-diff original vs recovered: every replacement must be `literal V -> getstatic F where value(F)==V`. Reports 0 mismatches + a name-provenance audit. |

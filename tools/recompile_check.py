@@ -145,7 +145,7 @@ def main():
     outdir = tempfile.mkdtemp(prefix="recompile_qa_")
     for i in range(0, len(files), a.batch):
         batch = files[i:i+a.batch]
-        cmd = [a.javac, "-nowarn", "-proc:none", "-source", a.source, "-target", a.target] + boot + \
+        cmd = [a.javac, "-nowarn", "-Xmaxerrs", "10000", "-proc:none", "-source", a.source, "-target", a.target] + boot + \
               ["-cp", cp, "-d", outdir] + batch
         r = subprocess.run(cmd, capture_output=True, text=True)
         err = r.stderr

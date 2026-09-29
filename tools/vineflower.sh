@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -eo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # Vineflower 1.12.0 is compiled for Java 17 (class 61); it must RUN on a JDK 17+.
@@ -47,7 +47,7 @@ REMOVE_SYNTHETIC=true
 # All --flag=value options first
 args=(
   "$JAVA_BIN" "-Xmx${VF_XMX:-30g}" -jar "$VF_JAR"
-  --decompile-generics=true
+  "--decompile-generics=${VF_DECOMPILE_GENERICS:-true}"
   --decompile-enums=true
   --decompile-assert=true
   --decompile-finally=true

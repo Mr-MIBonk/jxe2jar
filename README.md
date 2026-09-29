@@ -78,7 +78,8 @@ instead of a wall of magic numbers.
    `getChoiceModel(402127)` instead of a symbolic name. This pipeline rewrites selected literal
    loads into `getstatic Owner.FIELD` (value-preserving, decompile-only), so Vineflower
    then prints candidate names - **no regex over source text**. Every rewrite is proven
-   `value(F) == literal` (0 mismatches on 105,200 balanced replacements in MU1316). Full detail:
+   `value(F) == literal` (0 mismatches on 107,306 replacements in MU1316 with the
+   two-pass sink pipeline). Full detail:
    [Constant un-inlining (ASM)](#constant-un-inlining-asm---recover-inlined-static-final-names).
 
 4. **Decompile** with Vineflower:

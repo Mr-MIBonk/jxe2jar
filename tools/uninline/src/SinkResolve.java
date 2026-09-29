@@ -4,8 +4,8 @@
  * Non-distinctive cross-scope constants (e.g. DSIBAP.RT_GETBAPSTATE = 1000) are
  * recovered by WHERE the literal flows, using shallow intra-procedural dataflow
  * (ASM Analyzer<SourceValue>). Domains are LEARNED from surviving getstatic
- * references that the earlier un-inliner tiers (T1/T2/T3a) placed, so this runs on
- * an already-un-inlined jar and self-seeds.
+ * references, including those recovered by the earlier un-inliner tiers
+ * (T1/T2/T3a). It can run before and after Uninliner.
  *
  * Sinks whose domain is learned:
  *   - call-arg slot   (callee owner, method, desc, argIndex)  <- getstatic passed as arg
@@ -260,12 +260,15 @@ public class SinkResolve {
                     int base=f.getStackSize()-at.length;
                     for(int a=0;a<at.length;a++){
                         String owner=sinkOwner.get(call.owner+"."+call.name+call.desc+"#"+a); if(owner==null) continue;
-                        planLiteral(f, base+a, owner, plan, conflict);
+                        // Resource label IDs can collide with non-label constants.
+                        // Match Uninliner's setLabelId safeguard on the late pass.
+                        boolean labelId = call.name.equals("setLabelId") && call.desc.equals("(I)V") && a==0;
+                        planLiteral(f, base+a, owner, labelId, plan, conflict);
                     }
                 } else if(in.getOpcode()==Opcodes.PUTFIELD || in.getOpcode()==Opcodes.PUTSTATIC){
                     FieldInsnNode fi=(FieldInsnNode)in;
                     String owner=fieldOwner.get(fi.owner+"\0"+fi.name+"\0"+fi.desc); if(owner==null) continue;
-                    planLiteral(f, f.getStackSize()-1, owner, plan, conflict);
+                    planLiteral(f, f.getStackSize()-1, owner, false, plan, conflict);
                 }
             }
         }
@@ -278,7 +281,7 @@ public class SinkResolve {
                 in=next; } }
         ClassWriter cw=new ClassWriter(0); node.accept(cw); return cw.toByteArray();
     }
-    static void planLiteral(Frame<SourceValue> f, int stackIdx, String owner,
+    static void planLiteral(Frame<SourceValue> f, int stackIdx, String owner, boolean labelId,
                             Map<AbstractInsnNode,Ref> plan, Set<AbstractInsnNode> conflict){
         AbstractInsnNode p; try{ p=sole(f.getStack(stackIdx)); }catch(Exception e){ return; }
         if(p==null) return; String key=litKey(p); if(key==null) return;
@@ -286,6 +289,7 @@ public class SinkResolve {
         Map<String,List<Ref>> m=ownerPub.get(owner); if(m==null) return;
         List<Ref> ls=m.get(key); if(ls==null||ls.size()!=1) return;
         Ref r=ls.get(0); if(!meaningful(r.name)) return;
+        if(labelId && !r.name.toUpperCase(Locale.ROOT).endsWith("_LABEL")) return;
         if(plan.containsKey(p) && !same(plan.get(p),r)) conflict.add(p); else plan.put(p,r);
     }
     static boolean same(Ref a, Ref b){ return a.owner.equals(b.owner)&&a.name.equals(b.name)&&a.desc.equals(b.desc); }
