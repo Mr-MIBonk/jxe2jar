@@ -78,7 +78,7 @@ instead of a wall of magic numbers.
    `getChoiceModel(402127)` instead of a symbolic name. This pipeline rewrites selected literal
    loads into `getstatic Owner.FIELD` (value-preserving, decompile-only), so Vineflower
    then prints candidate names - **no regex over source text**. Every rewrite is proven
-   `value(F) == literal` (0 mismatches on 107,306 replacements in MU1316 with the
+   `value(F) == literal` (0 mismatches on 106,037 replacements in the current MU1316 cycle with the
    two-pass sink pipeline). Full detail:
    [Constant un-inlining (ASM)](#constant-un-inlining-asm---recover-inlined-static-final-names).
 
@@ -102,7 +102,7 @@ instead of a wall of magic numbers.
 
 6. **Repair artifacts, index:**
    ```
-   python3 tools/fix_vf_artifacts.py  out/final-vf --apply             # <unrepresentable> -> Object
+   python3 tools/fix_vf_artifacts.py  out/final-vf --apply             # remaining VF rendering errors
    python3 tools/int2hex.py           out/final-vf --apply             # hex bitmasks/flags
    python3 tools/nav_index.py         out/final.jar out/nav            # who-uses / what-is-N index
    ```
@@ -617,9 +617,11 @@ independent top-level class, so anonymous classes come out as separate `Outer$N.
 synthetic `access$NNN` accessors get stripped from the outer class but are still called from the
 inners (unresolved references), and private-inner constructors keep their synthetic disambiguator
 argument (wrong arity). With `EnclosingMethod` present, Vineflower inlines anonymous classes into
-their enclosing method and resolves all of these. One residual VF artifact (`<unrepresentable>`
-on a nested anonymous class's synthetic outer-`this` field) is cleaned by
-`tools/fix_vf_artifacts.py`.
+their enclosing method and resolves all of these. The converter also preserves the ROM's
+`ACC_SYNTHETIC` field bit (`0x1000`) for captured `this$N` and `val$...` fields. An older field
+mask accidentally used `0x0100`, so Vineflower treated captures as ordinary fields and emitted
+invalid anonymous-class constructor arguments. The corrected flag lets Vineflower reconstruct
+those captures directly; `fix_vf_artifacts.py` handles only independent residual source errors.
 
 **The `new` site fills in what the romizer erased.** The ROM keeps the record for only a
 fraction of anonymous classes - on MU1316, 403 of 10701 - so the rest used to fall back to the

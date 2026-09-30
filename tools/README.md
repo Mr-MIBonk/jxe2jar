@@ -22,7 +22,7 @@ flowchart LR
 | [`vineflower.sh`](#vineflowersh) | driver | primary decompiler (VF 1.12.0, `jad` renamer, JDK8 runtime) |
 | [`cfr.sh`](#cfrsh) | driver | alternate decompiler (CFR 0.152) for cross-referencing |
 | [`decompile_fallback.py`](#decompile_fallbackpy) | repair | re-decompile VF stubs with CFR |
-| [`fix_vf_artifacts.py`](#fix_vf_artifactspy) | repair | fix `<unrepresentable>` / keyword-identifier artifacts |
+| [`fix_vf_artifacts.py`](#fix_vf_artifactspy) | repair | fix remaining VF rendering errors (keywords, class literals, casts) |
 | [`int2hex.py`](#int2hexpy) | repair | decimal bitmasks/flags -> hex |
 | [`foreach1_4/`](#foreach1_4) | repair | enhanced for-each -> Java 1.4 loops (javaparser) |
 | [`nav_index.py`](#nav_indexpy) | analysis | "what is value N" / "who uses this constant" index |
@@ -125,12 +125,11 @@ python3 tools/decompile_fallback.py out/final-vf out/final.jar             # re-
 ```
 
 ### `fix_vf_artifacts.py`
-When anonymous classes are inlined (the `EnclosingMethod` attribute enables this), Vineflower
-occasionally can't name a nested anonymous class's synthetic outer-`this` field and emits the
-placeholder `<unrepresentable>`; it also sometimes emits Java keywords as identifiers,
-mistakes synthetic capture arguments for constructor arguments, or retains a `class$(String)`
-call without its helper. This repairs those shapes, including nested captures, by binding
-captured values through final locals and restoring class literals.
+The converter now preserves `ACC_SYNTHETIC` on captured `this$N` and `val$...` fields, so
+Vineflower reconstructs anonymous captures from bytecode metadata without source rewriting.
+This smaller postprocessor handles separate rendering errors: `<unrepresentable>` on standalone
+classes, keyword-derived variable names, duplicate intersection casts, raw `toArray(T[])`
+assignments, and old-compiler `class$(String)` calls and cache expressions.
 
 ```sh
 python3 tools/fix_vf_artifacts.py out/final-vf            # report

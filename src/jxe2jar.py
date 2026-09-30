@@ -49,7 +49,7 @@ FIELD_FLAG_MASK = (
     | 0x0010  # final
     | 0x0040  # volatile / bridge
     | 0x0080  # transient / varargs
-    | 0x0100  # synthetic / native
+    | 0x1000  # synthetic (0x0100 is the native bit for methods, not fields)
     | 0x4000  # enum
 )
 
