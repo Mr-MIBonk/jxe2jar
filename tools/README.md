@@ -24,6 +24,7 @@ flowchart LR
 | [`decompile_fallback.py`](#decompile_fallbackpy) | repair | re-decompile VF stubs with CFR |
 | [`cfr_compile_fallback.py`](#cfr_compile_fallbackpy) | repair | replace failed VF files only when CFR source passes javac |
 | [`fix_vf_artifacts.py`](#fix_vf_artifactspy) | repair | fix remaining VF rendering errors (keywords, class literals, casts) |
+| [`repair_unreachable_clone_catches.py`](#repair_unreachable_clone_catchespy) | repair | remove clone catches proven unreachable by the firmware-JCL compiler |
 | [`int2hex.py`](#int2hexpy) | repair | decimal bitmasks/flags -> hex |
 | [`foreach1_4/`](#foreach1_4) | repair | enhanced for-each -> Java 1.4 loops (javaparser) |
 | [`foreach_compile_fallback.py`](#foreach_compile_fallbackpy) | repair | promote only compiler-passing for-each rewrites |
@@ -176,6 +177,18 @@ assignments, and old-compiler `class$(String)` calls and cache expressions.
 ```sh
 python3 tools/fix_vf_artifacts.py out/final-vf            # report
 python3 tools/fix_vf_artifacts.py out/final-vf --apply    # <unrepresentable> -> Object, etc.
+```
+
+### `repair_unreachable_clone_catches.py`
+Some original classes catch `CloneNotSupportedException` around `clone()`, while the
+firmware JCL used for Java 1.4 compilation declares that call without the checked
+exception. This report-driven repair replaces only the rejected `try/catch` with
+its body as a scoped block. It requires an `isolated_compile_check.py` report;
+recompile the changed files afterward.
+
+```sh
+python3 tools/repair_unreachable_clone_catches.py out/MU1316-vf-isolated-compile.json
+python3 tools/repair_unreachable_clone_catches.py out/MU1316-vf-isolated-compile.json --apply
 ```
 
 ### `int2hex.py`
