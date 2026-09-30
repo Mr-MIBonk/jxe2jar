@@ -267,7 +267,8 @@ The bundled `junit-3.8.2.jar` is the [Maven Central artifact](https://repo.maven
 ```sh
 python3 tools/isolated_compile_check.py out/MU1316-vf \
   --jar out/MU1316-final.jar --jcl libs/jcl/MHI2Q_US_AUG22_P5087_MU1316/jcl.jar \
-  --version-aware --json-report out/MU1316-vf-isolated-compile.json
+  --version-aware --filter-clashing-classes \
+  --json-report out/MU1316-vf-isolated-compile.json
 python3 tools/explicit_unboxing.py out/MU1316-vf out/MU1316-final.jar \
   out/MU1316-vf-isolated-compile.json \
   --jcl libs/jcl/MHI2Q_US_AUG22_P5087_MU1316/jcl.jar
@@ -279,7 +280,9 @@ use implicit boxing or unboxing. Only individually compiler-passing files are
 promoted with `--apply`. A passing isolated check establishes source syntax and
 type consistency against the original binaries; it does not prove runtime
 equivalence or that all sources can be rebuilt together. Some class/package
-collisions remain unrepresentable to `javac` even in an isolated task.
+collisions require `--filter-clashing-classes`, which temporarily omits the
+same-named parent class from that source file's compile classpath. The option
+preserves original binary names and reports how many classpaths it filtered.
 
 **`javap` trap** (why trust `--jcl`, not `javap`): `javap -classpath jcl.jar java.lang.Class`
 still prints the **JDK8** class (`getSimpleName` present, StringBuilder-based body) because

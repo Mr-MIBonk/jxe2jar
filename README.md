@@ -114,6 +114,11 @@ instead of a wall of magic numbers.
    python3 tools/recompile_check.py out/final-vf --jar out/final.jar --jcl libs/jcl/<FW>/jcl.jar --json-report out/compile.json
    python3 tools/foreach_compile_fallback.py out/final-vf out/final.jar out/compile.json --jcl libs/jcl/<FW>/jcl.jar --apply
    ```
+
+   For the definitive per-source count across mixed Java 1.4/1.5 classes, run
+   `tools/isolated_compile_check.py` with `--version-aware --filter-clashing-classes`.
+   It reports each source independently against the original class JAR; see
+   [the tool guide](tools/README.md#isolated_compile_checkpy-and-explicit_unboxingpy).
    CFR gates each replacement in isolation. The for-each tool also checks the complete source tree
    before promoting changes. Re-run the compile check afterward; neither decompiler guarantees a complete build.
 

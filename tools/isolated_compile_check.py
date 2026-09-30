@@ -41,6 +41,8 @@ def main():
     parser.add_argument("--source", default="1.4")
     parser.add_argument("--target", default=None)
     parser.add_argument("--version-aware", action="store_true")
+    parser.add_argument("--filter-clashing-classes", action="store_true",
+                        help="omit same-named parent classes from each package source's compile classpath")
     parser.add_argument("--from-report", type=Path)
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--json-report", type=Path)
@@ -57,19 +59,27 @@ def main():
         parser.error("--jcl does not exist")
     supplements = sorted(str(path.resolve()) for path in args.libs.glob("*.jar")
                          if "sources" not in path.name and "javadoc" not in path.name)
-    classpath = os.pathsep.join([str(jar)] + supplements)
     levels = {}
-    if args.version_aware:
-        with zipfile.ZipFile(jar) as archive:
-            for path in files:
+    omitted = {}
+    with zipfile.ZipFile(jar) as archive:
+        names = set(archive.namelist())
+        for path in files:
+            rel = path.relative_to(tree)
+            if args.version_aware:
                 name = path.relative_to(tree).as_posix()[:-5] + ".class"
                 try:
                     major = int.from_bytes(archive.read(name)[6:8], "big")
                 except KeyError:
                     parser.error("missing class in JAR: " + name)
                 levels[path] = "1.5" if major >= 49 else "1.4"
-    else:
-        levels = {path: args.source for path in files}
+            else:
+                levels[path] = args.source
+            if args.filter_clashing_classes:
+                parents = ["/".join(rel.parts[:i]) + ".class"
+                           for i in range(1, len(rel.parts))]
+                omitted[path] = tuple(name for name in parents if name in names)
+            else:
+                omitted[path] = ()
 
     java = args.java or str(Path(args.javac).with_name("java"))
     results = {}
@@ -86,11 +96,23 @@ def main():
                                capture_output=True, text=True)
         if build.returncode:
             raise RuntimeError("cannot build IsolatedCompileRunner: " + build.stderr)
-        # javac's file manager caches the bootclasspath. Keep Java 1.4/JCL and
-        # Java 1.5/JDK-boot runs in separate processes so neither leaks into the other.
-        for level in sorted(set(levels.values())):
-            group = [path for path in files if levels[path] == level]
+        # The file manager caches boot and regular classpaths. Keep each Java
+        # level and class/package-conflict filter in a separate process.
+        filtered_jars = {}
+        for level, excluded in sorted({(levels[path], omitted[path]) for path in files}):
+            group = [path for path in files if levels[path] == level and omitted[path] == excluded]
             target = level if args.version_aware else args.target or level
+            if excluded not in filtered_jars:
+                if excluded:
+                    filtered = work / ("filtered_%d.jar" % len(filtered_jars))
+                    with zipfile.ZipFile(jar) as source, zipfile.ZipFile(filtered, "w") as destination:
+                        for info in source.infolist():
+                            if info.filename not in excluded:
+                                destination.writestr(info, source.read(info))
+                    filtered_jars[excluded] = filtered
+                else:
+                    filtered_jars[excluded] = jar
+            classpath = os.pathsep.join([str(filtered_jars[excluded])] + supplements)
             input_rows = "".join("%s\t%s\t%s\n" % (level, target, path) for path in group)
             run = subprocess.run([java, "-Xmx4g", "-cp", str(runner), "IsolatedCompileRunner",
                                   str(args.jcl.resolve()) if args.jcl and level == "1.4" else "-",
@@ -106,13 +128,17 @@ def main():
                 status, raw, error = row.split("\t", 2)
                 path = Path(raw)
                 results[path] = {"source": level, "target": target,
+                                 "filtered_classes": list(excluded),
                                  "passed": status == "OK", "errors": [error] if error else []}
 
     failures = {str(path): results[path] for path in files if not results[path]["passed"]}
     passed = len(files) - len(failures)
-    print("isolated compile: %d/%d passed, %d failed" % (passed, len(files), len(failures)))
+    filtered_count = sum(bool(omitted[path]) for path in files)
+    print("isolated compile: %d/%d passed, %d failed (%d filtered classpaths)" %
+          (passed, len(files), len(failures), filtered_count))
     if args.json_report:
         args.json_report.write_text(json.dumps({"files": len(files), "passed": passed,
+                                               "filtered_classpaths": filtered_count,
                                                "reported_failures": failures}, indent=2) + "\n")
     return 0 if not failures else 1
 
