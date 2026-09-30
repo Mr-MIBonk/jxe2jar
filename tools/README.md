@@ -26,6 +26,7 @@ flowchart LR
 | [`fix_vf_artifacts.py`](#fix_vf_artifactspy) | repair | fix remaining VF rendering errors (keywords, class literals, casts) |
 | [`int2hex.py`](#int2hexpy) | repair | decimal bitmasks/flags -> hex |
 | [`foreach1_4/`](#foreach1_4) | repair | enhanced for-each -> Java 1.4 loops (javaparser) |
+| [`foreach_compile_fallback.py`](#foreach_compile_fallbackpy) | repair | promote only compiler-passing for-each rewrites |
 | [`nav_index.py`](#nav_indexpy) | analysis | "what is value N" / "who uses this constant" index |
 | [`xref.py`](#xrefpy) | analysis | bytecode cross-reference (callers/uses/dump) |
 | [`recompile_check.py`](#recompile_checkpy) | QA | round-trip gate: does the decompiled source recompile? |
@@ -128,6 +129,7 @@ python3 tools/decompile_fallback.py out/final-vf out/final.jar             # re-
 ### `cfr_compile_fallback.py`
 For source files that fail the compile check, try CFR on the same classfile. Each CFR result
 is compiled on its own against the original JAR; only passing files are eligible for replacement.
+The tool tries CFR's default output, then `--sugarboxing false` if the first variant fails.
 Use the firmware JCL and `--source 1.4` for runtime-targeted output. A Java 8 gate is useful for
 isolating decompiler errors, but does not prove that output runs on the firmware.
 
@@ -171,6 +173,18 @@ errors, including implicit unboxing and raw collection element types.
 
 ```sh
 java -cp "tools/foreach1_4/*:tools/foreach1_4" RewriteForeach final.jar libs path/to/File.java
+```
+
+### `foreach_compile_fallback.py`
+Run the same rewrite through a compile gate, without editing the tree during the dry run.
+With `--apply`, the tool stages the complete tree and refuses promotion if any previously
+passing file fails the full-tree check. It still cannot prove that every decompiled file
+compiles: the diagnostic report records each file's first error.
+
+```sh
+python3 tools/recompile_check.py out/final-vf --jar out/final.jar --jcl libs/jcl/<FW>/jcl.jar --json-report out/compile.json
+python3 tools/foreach_compile_fallback.py out/final-vf out/final.jar out/compile.json --jcl libs/jcl/<FW>/jcl.jar --result out/foreach.json
+python3 tools/foreach_compile_fallback.py out/final-vf out/final.jar out/compile.json --jcl libs/jcl/<FW>/jcl.jar --apply
 ```
 
 ---

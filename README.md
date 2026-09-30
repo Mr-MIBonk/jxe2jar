@@ -111,9 +111,11 @@ instead of a wall of magic numbers.
    ```
    python3 tools/recompile_check.py out/final-vf --jar out/final.jar --jcl libs/jcl/<FW>/jcl.jar --json-report out/compile.json
    python3 tools/cfr_compile_fallback.py out/final-vf out/final.jar out/compile.json --jcl libs/jcl/<FW>/jcl.jar --apply
+   python3 tools/recompile_check.py out/final-vf --jar out/final.jar --jcl libs/jcl/<FW>/jcl.jar --json-report out/compile.json
+   python3 tools/foreach_compile_fallback.py out/final-vf out/final.jar out/compile.json --jcl libs/jcl/<FW>/jcl.jar --apply
    ```
-   CFR replaces a failed Vineflower source file only if its output compiles in isolation.
-   Re-run the compile check afterward; neither decompiler guarantees a complete build.
+   CFR gates each replacement in isolation. The for-each tool also checks the complete source tree
+   before promoting changes. Re-run the compile check afterward; neither decompiler guarantees a complete build.
 
 The output is readable Java with inline nested classes, `throws` clauses, generics, symbolic
 constant references, and hex bitmasks.

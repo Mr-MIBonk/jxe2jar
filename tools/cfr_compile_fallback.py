@@ -34,7 +34,7 @@ def candidates(tree, report):
     return sorted(paths, key=lambda item: str(item[1]))
 
 
-def cfr_source(archive, entries, rel, jar, java, cfr, work):
+def cfr_source(archive, entries, rel, jar, java, cfr, work, variant, flags):
     base = rel.as_posix()[:-5]
     direct = base + ".class"
     if direct not in entries:
@@ -45,10 +45,10 @@ def cfr_source(archive, entries, rel, jar, java, cfr, work):
             path = classes / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(archive.read(name))
-    output = work / "cfr"
+    output = work / variant
     command = [java, "-Xmx3g", "-jar", str(cfr), str(classes / direct),
                "--outputdir", str(output), "--comments", "false", "--showversion", "false",
-               "--silent", "true", "--extraclasspath", str(jar)]
+               "--silent", "true", "--extraclasspath", str(jar)] + flags
     run = subprocess.run(command, capture_output=True, text=True)
     source = output / rel
     if run.returncode or not source.is_file():
@@ -87,25 +87,29 @@ def main():
         for original, rel in selected:
             with tempfile.TemporaryDirectory(prefix="cfr_compile_fallback_") as temp:
                 work = Path(temp)
-                source, error = cfr_source(archive, entries, rel, jar, args.java, args.cfr, work)
-                if error:
-                    results[rel.as_posix()] = {"status": "skipped", "reason": error}
-                    continue
-                compiled = work / "compiled"
-                compiled.mkdir()
-                command = [args.javac, "-nowarn", "-proc:none", "-source", args.source,
-                           "-target", args.target or args.source]
-                if args.jcl:
-                    command += ["-bootclasspath", str(args.jcl)]
-                command += ["-cp", classpath, "-d", str(compiled), str(source)]
-                run = subprocess.run(command, capture_output=True, text=True)
-                if run.returncode:
-                    errors = re.findall(r": error: (.*)", run.stderr)
-                    results[rel.as_posix()] = {"status": "skipped", "reason": errors[:2] or [run.stderr[:200]]}
-                    continue
-                if args.apply:
-                    original.write_bytes(source.read_bytes())
-                results[rel.as_posix()] = {"status": "applied" if args.apply else "would_apply"}
+                variants = [("default", []), ("no_boxing", ["--sugarboxing", "false"])]
+                for variant, flags in variants:
+                    source, error = cfr_source(archive, entries, rel, jar, args.java, args.cfr, work, variant, flags)
+                    if error:
+                        results[rel.as_posix()] = {"status": "skipped", "reason": error}
+                        continue
+                    compiled = work / ("compiled_" + variant)
+                    compiled.mkdir()
+                    command = [args.javac, "-nowarn", "-proc:none", "-source", args.source,
+                               "-target", args.target or args.source]
+                    if args.jcl:
+                        command += ["-bootclasspath", str(args.jcl)]
+                    command += ["-cp", classpath, "-d", str(compiled), str(source)]
+                    run = subprocess.run(command, capture_output=True, text=True)
+                    if run.returncode:
+                        errors = re.findall(r": error: (.*)", run.stderr)
+                        results[rel.as_posix()] = {"status": "skipped", "reason": errors[:2] or [run.stderr[:200]]}
+                        continue
+                    if args.apply:
+                        original.write_bytes(source.read_bytes())
+                    results[rel.as_posix()] = {"status": "applied" if args.apply else "would_apply",
+                                               "variant": variant}
+                    break
     accepted = sum(value["status"] != "skipped" for value in results.values())
     print(f"CFR compilable: {accepted}/{len(results)} candidate(s); "
           + ("applied" if args.apply else "dry-run"))
