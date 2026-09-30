@@ -34,7 +34,7 @@ def candidates(tree, report):
     return sorted(paths, key=lambda item: str(item[1]))
 
 
-def cfr_source(archive, entries, rel, jar, java, cfr, work, variant, flags):
+def cfr_source(archive, entries, rel, classpath, java, cfr, work, variant, flags):
     base = rel.as_posix()[:-5]
     direct = base + ".class"
     if direct not in entries:
@@ -48,7 +48,7 @@ def cfr_source(archive, entries, rel, jar, java, cfr, work, variant, flags):
     output = work / variant
     command = [java, "-Xmx3g", "-jar", str(cfr), str(classes / direct),
                "--outputdir", str(output), "--comments", "false", "--showversion", "false",
-               "--silent", "true", "--extraclasspath", str(jar)] + flags
+               "--silent", "true", "--extraclasspath", classpath] + flags
     run = subprocess.run(command, capture_output=True, text=True)
     source = output / rel
     if run.returncode or not source.is_file():
@@ -60,11 +60,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("tree", type=Path)
     parser.add_argument("jar", type=Path)
-    parser.add_argument("diagnostics", help="JSON from recompile_check.py --json-report")
-    parser.add_argument("--source", default="1.4")
+    parser.add_argument("diagnostics", help="JSON from recompile_check.py or isolated_compile_check.py")
+    parser.add_argument("--source", help="override per-file source level from the report (default 1.4)")
     parser.add_argument("--target", default=None)
     parser.add_argument("--jcl", type=Path, help="firmware JCL for -bootclasspath")
-    parser.add_argument("--osgi", type=Path, default=Path(DEF_OSGI))
+    parser.add_argument("--libs", "--osgi", dest="libs", type=Path, default=Path(DEF_OSGI),
+                        help="directory of supplemental compile-time JARs")
     parser.add_argument("--javac", default=DEF_JAVAC)
     parser.add_argument("--java", default="java")
     parser.add_argument("--cfr", type=Path, default=HERE / "cfr-0.152.jar")
@@ -73,31 +74,36 @@ def main():
     args = parser.parse_args()
     tree, jar = args.tree.resolve(), args.jar.resolve()
     selected = candidates(tree, args.diagnostics)
+    diagnoses = {str(Path(raw).resolve()): value for raw, value in
+                 json.loads(Path(args.diagnostics).read_text())["reported_failures"].items()}
     classpath = str(jar)
-    if args.osgi.is_dir():
-        osgi_jars = [
-            str(path) for path in sorted(args.osgi.glob("org.osgi*.jar"))
+    if args.libs.is_dir():
+        supplemental_jars = [
+            str(path.resolve()) for path in sorted(args.libs.glob("*.jar"))
             if "sources" not in path.name and "javadoc" not in path.name
         ]
-        if osgi_jars:
-            classpath += os.pathsep + os.pathsep.join(osgi_jars)
+        if supplemental_jars:
+            classpath += os.pathsep + os.pathsep.join(supplemental_jars)
     results = {}
     with zipfile.ZipFile(jar) as archive:
         entries = set(archive.namelist())
         for original, rel in selected:
+            level = args.source or diagnoses[str(original)].get("source", "1.4")
+            target = args.target or level
             with tempfile.TemporaryDirectory(prefix="cfr_compile_fallback_") as temp:
                 work = Path(temp)
                 variants = [("default", []), ("no_boxing", ["--sugarboxing", "false"])]
                 for variant, flags in variants:
-                    source, error = cfr_source(archive, entries, rel, jar, args.java, args.cfr, work, variant, flags)
+                    source, error = cfr_source(archive, entries, rel, classpath, args.java, args.cfr,
+                                               work, variant, flags)
                     if error:
                         results[rel.as_posix()] = {"status": "skipped", "reason": error}
                         continue
                     compiled = work / ("compiled_" + variant)
                     compiled.mkdir()
-                    command = [args.javac, "-nowarn", "-proc:none", "-source", args.source,
-                               "-target", args.target or args.source]
-                    if args.jcl:
+                    command = [args.javac, "-nowarn", "-proc:none", "-source", level,
+                               "-target", target]
+                    if args.jcl and level == "1.4":
                         command += ["-bootclasspath", str(args.jcl)]
                     command += ["-cp", classpath, "-d", str(compiled), str(source)]
                     run = subprocess.run(command, capture_output=True, text=True)
@@ -108,7 +114,7 @@ def main():
                     if args.apply:
                         original.write_bytes(source.read_bytes())
                     results[rel.as_posix()] = {"status": "applied" if args.apply else "would_apply",
-                                               "variant": variant}
+                                               "variant": variant, "source": level}
                     break
     accepted = sum(value["status"] != "skipped" for value in results.values())
     print(f"CFR compilable: {accepted}/{len(results)} candidate(s); "
@@ -117,7 +123,8 @@ def main():
         print(value["status"], rel, value.get("reason", ""))
     if args.result:
         args.result.write_text(json.dumps({"tree": str(tree), "jar": str(jar),
-                                           "source": args.source, "target": args.target or args.source,
+                                           "source": args.source or "per-file report (default 1.4)",
+                                           "target": args.target or "same as source",
                                            "results": results}, indent=2) + "\n")
 
 

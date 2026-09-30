@@ -113,7 +113,26 @@ Option set + manual command: [README -> Decompiling with CFR](../README.md#decom
 
 ## Decompile repair (post-processing)
 
-Run in this order after Vineflower. All support a dry-run (default) and `--apply` (in place).
+### `innerclasses/repair.sh`
+
+Some firmware classfiles list an anonymous `$N` class in `InnerClasses` without
+its owner. Vineflower then emits a standalone `Outer$N.java` that refers to
+synthetic `this$0` fields or private nested types. This ASM pass restores the
+owner only when the class captures `this$N` of that exact type, or when the
+owner itself constructs the static anonymous class. Use the repaired JAR for
+decompilation only; keep the original final JAR for firmware binaries and
+bytecode comparisons.
+
+```sh
+bash tools/innerclasses/repair.sh out/final.jar out/final-innerclasses.jar
+```
+
+When promoting re-decompiled source, compile the owner and confirm it emits
+the same set of class names as the original owner family before removing the
+old standalone `$N.java` files. This check prevents dropping a nested class.
+
+The following source repair tools run after Vineflower. They support a dry-run
+(default) and `--apply` for in-place changes.
 
 ### `decompile_fallback.py`
 Vineflower occasionally emits a `// $VF: Couldn't be decompiled` stub for a method whose control
@@ -138,6 +157,9 @@ python3 tools/recompile_check.py out/final-vf --jar out/final.jar --json-report 
 python3 tools/cfr_compile_fallback.py out/final-vf out/final.jar out/compile.json
 python3 tools/cfr_compile_fallback.py out/final-vf out/final.jar out/compile.json --apply
 ```
+
+The fallback also accepts an `isolated_compile_check.py` report and uses its
+per-file Java source level. It includes all compiler dependencies in `libs/`.
 
 ### `fix_vf_artifacts.py`
 The converter now preserves `ACC_SYNTHETIC` on captured `this$N` and `val$...` fields, so
@@ -229,6 +251,35 @@ python3 tools/recompile_check.py out/final-vf
 python3 tools/recompile_check.py out/final-vf --jcl libs/jcl/MHI2Q_US_AUG22_P5087_MU1316/jcl.jar
 ```
 `--json-report PATH` also writes per-file diagnostics for compiler-gated fallback tools.
+
+### `isolated_compile_check.py` and `explicit_unboxing.py`
+
+The full-tree check can hide later errors when an earlier file fails. Also, the
+firmware contains JVM-valid class/package name collisions that `javac` cannot
+compile as one tree. The isolated check compiles each source in a fresh
+task against the original class JAR and reports its first error. It selects
+Java 1.4 plus the firmware JCL for original classfile versions 45–48, and
+Java 1.5 plus the JDK 8 boot classes for version 49. Put supplemental compiler
+dependencies, including JUnit 3.8.2 for bundled test classes, in `libs/`.
+The bundled `junit-3.8.2.jar` is the [Maven Central artifact](https://repo.maven.apache.org/maven2/junit/junit/3.8.2/junit-3.8.2.jar)
+(SHA-1 `07e4cde26b53a9a0e3fe5b00d1dbbc7cc1d46060`).
+
+```sh
+python3 tools/isolated_compile_check.py out/MU1316-vf \
+  --jar out/MU1316-final.jar --jcl libs/jcl/MHI2Q_US_AUG22_P5087_MU1316/jcl.jar \
+  --version-aware --json-report out/MU1316-vf-isolated-compile.json
+python3 tools/explicit_unboxing.py out/MU1316-vf out/MU1316-final.jar \
+  out/MU1316-vf-isolated-compile.json \
+  --jcl libs/jcl/MHI2Q_US_AUG22_P5087_MU1316/jcl.jar
+```
+
+`explicit_unboxing.py` works on temporary copies. It uses the exact error span
+from `javac` to restore explicit wrapper conversion calls where Java 1.4 cannot
+use implicit boxing or unboxing. Only individually compiler-passing files are
+promoted with `--apply`. A passing isolated check establishes source syntax and
+type consistency against the original binaries; it does not prove runtime
+equivalence or that all sources can be rebuilt together. Some class/package
+collisions remain unrepresentable to `javac` even in an isolated task.
 
 **`javap` trap** (why trust `--jcl`, not `javap`): `javap -classpath jcl.jar java.lang.Class`
 still prints the **JDK8** class (`getSimpleName` present, StringBuilder-based body) because

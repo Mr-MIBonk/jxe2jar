@@ -50,5 +50,31 @@ def test_compiler_gated_fallback():
         assert subprocess.run(check, capture_output=True, text=True).returncode == 0
 
 
+def test_version_aware_fallback():
+    with tempfile.TemporaryDirectory() as directory:
+        work = pathlib.Path(directory)
+        tree = work / "source"
+        tree.mkdir()
+        source = tree / "Generic.java"
+        source.write_text("public class Generic<T> { public T value(T input) { return input; } }\n")
+        subprocess.run([str(JDK8 / "javac"), "-source", "1.5", "-target", "1.5", str(source)],
+                       check=True, capture_output=True, text=True)
+        jar = work / "generic.jar"
+        with zipfile.ZipFile(jar, "w") as archive:
+            archive.write(tree / "Generic.class", "Generic.class")
+        source.write_text("public class Generic<T> { public T value(T input) { return missing; } }\n")
+        report = work / "errors.json"
+        check = [sys.executable, str(ROOT / "tools/isolated_compile_check.py"), str(tree),
+                 "--jar", str(jar), "--libs", str(work), "--version-aware", "--json-report", str(report)]
+        assert subprocess.run(check, capture_output=True, text=True).returncode == 1
+        assert json.loads(report.read_text())["reported_failures"][str(source.resolve())]["source"] == "1.5"
+        fallback = [sys.executable, str(ROOT / "tools/cfr_compile_fallback.py"), str(tree),
+                    str(jar), str(report), "--libs", str(work), "--apply"]
+        applied = subprocess.run(fallback, check=True, capture_output=True, text=True)
+        assert "CFR compilable: 1/1" in applied.stdout
+        assert subprocess.run(check, capture_output=True, text=True).returncode == 0
+
+
 if __name__ == "__main__":
     test_compiler_gated_fallback()
+    test_version_aware_fallback()
