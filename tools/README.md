@@ -119,7 +119,9 @@ Some firmware classfiles list an anonymous `$N` class in `InnerClasses` without
 its owner. Vineflower then emits a standalone `Outer$N.java` that refers to
 synthetic `this$0` fields or private nested types. This ASM pass restores the
 owner only when the class captures `this$N` of that exact type, or when the
-owner itself constructs the static anonymous class. Use the repaired JAR for
+owner itself constructs the static anonymous class. It also handles flattened
+anonymous names such as `Outer$2` capturing `Outer$1`, but only when `Outer$1`
+constructs `Outer$2`. Use the repaired JAR for
 decompilation only; keep the original final JAR for firmware binaries and
 bytecode comparisons.
 
@@ -129,7 +131,10 @@ bash tools/innerclasses/repair.sh out/final.jar out/final-innerclasses.jar
 
 When promoting re-decompiled source, compile the owner and confirm it emits
 the same set of class names as the original owner family before removing the
-old standalone `$N.java` files. This check prevents dropping a nested class.
+old standalone `$N.java` files. A nested anonymous class can be renumbered by
+`javac` (for example, `Outer$2` becomes `Outer$1$1`). In that case, additionally
+require a one-to-one class count, preserve every named class, and verify that
+no class outside the owner family references the old anonymous name.
 
 The following source repair tools run after Vineflower. They support a dry-run
 (default) and `--apply` for in-place changes.

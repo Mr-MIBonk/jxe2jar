@@ -20,7 +20,7 @@ import org.objectweb.asm.FieldVisitor;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 
-/** Restore missing outer names for anonymous classes backed by a this$ field. */
+/** Restore missing owners of anonymous classes using captures or constructor sites. */
 public final class RepairInnerClasses {
     private static final int ASM = Opcodes.ASM9;
 
@@ -51,6 +51,7 @@ public final class RepairInnerClasses {
         Set<String> names = new HashSet<String>(entries);
         final Map<String, String> restored = new HashMap<String, String>();
         final Map<String, String> staticCandidates = new HashMap<String, String>();
+        final Map<String, String> nestedCandidates = new HashMap<String, String>();
         for (String entry : entries) {
             if (!entry.endsWith(".class")) {
                 continue;
@@ -66,12 +67,26 @@ public final class RepairInnerClasses {
             }
             final boolean[] outerField = {false};
             final boolean[] incomplete = {false};
+            final String[] capturedOwner = {null};
+            final boolean[] ambiguousCapture = {false};
             byte[] bytes = read(source.getInputStream(source.getEntry(entry)));
             new ClassReader(bytes).accept(new ClassVisitor(ASM) {
                 @Override public FieldVisitor visitField(int access, String field, String descriptor,
                                                          String signature, Object value) {
-                    if (field.matches("this\\$[0-9]+") && descriptor.equals("L" + outer + ";")) {
-                        outerField[0] = true;
+                    if (field.matches("this\\$[0-9]+")) {
+                        if (descriptor.equals("L" + outer + ";")) {
+                            outerField[0] = true;
+                        } else if (descriptor.startsWith("L" + outer + "$")
+                                && descriptor.endsWith(";")) {
+                            String candidate = descriptor.substring(1, descriptor.length() - 1);
+                            if (names.contains(candidate + ".class")) {
+                                if (capturedOwner[0] != null && !capturedOwner[0].equals(candidate)) {
+                                    ambiguousCapture[0] = true;
+                                } else {
+                                    capturedOwner[0] = candidate;
+                                }
+                            }
+                        }
                     }
                     return null;
                 }
@@ -85,15 +100,20 @@ public final class RepairInnerClasses {
             }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
             if (outerField[0] && incomplete[0]) {
                 restored.put(name, outer);
+            } else if (capturedOwner[0] != null && !ambiguousCapture[0] && incomplete[0]) {
+                nestedCandidates.put(name, capturedOwner[0]);
             } else if (incomplete[0]) {
                 staticCandidates.put(name, outer);
             }
         }
 
-        // Static anonymous classes have no this$ capture. Require a NEW in the
-        // lexical outer class before restoring their otherwise absent owner.
+        // Static anonymous classes have no this$ capture. A flattened class
+        // such as Foo$2 can instead capture Foo$1. For either case require a
+        // NEW in the proposed lexical owner before restoring its metadata.
         Map<String, Set<String>> byOuter = new HashMap<String, Set<String>>();
-        for (Map.Entry<String, String> candidate : staticCandidates.entrySet()) {
+        Map<String, String> candidates = new HashMap<String, String>(staticCandidates);
+        candidates.putAll(nestedCandidates);
+        for (Map.Entry<String, String> candidate : candidates.entrySet()) {
             Set<String> children = byOuter.get(candidate.getValue());
             if (children == null) {
                 children = new HashSet<String>();
