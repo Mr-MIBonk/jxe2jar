@@ -20,11 +20,12 @@ import java.util.concurrent.atomic.AtomicInteger;
  *  - Iterable  -> Iterator + while (raw, cast element to erased type)
  *  - array     -> indexed for
  * Element type has its generics erased (illegal at -source 1.4).
- * Array-vs-Iterable decided by symbol resolution (classpath = combined-final.jar + libs);
- * on unresolved types, falls back to: primitive element => array, else Iterable.
+ * Array-vs-Iterable decided by symbol resolution (classpath = combined-final.jar + libs).
+ * An unresolved type is reported and left untouched: guessing can change semantics.
  */
 public class RewriteForeach {
     static int filesChanged = 0, loopsRewritten = 0, resolveFails = 0;
+    static Path currentFile;
 
     public static void main(String[] args) throws Exception {
         String jar = args[0];            // classpath jar (combined-final.jar)
@@ -64,16 +65,18 @@ public class RewriteForeach {
             if (++done % 2000 == 0) System.out.println("  ...scanned " + done + "/" + files.size());
         }
         System.out.println("\nfiles changed: " + filesChanged + "  loops rewritten: " + loopsRewritten
-                + "  (resolve-fallbacks: " + resolveFails + ")");
+                + "  (unresolved loops left unchanged: " + resolveFails + ")");
     }
 
     static boolean processFile(Path f) throws Exception {
+        currentFile = f;
         CompilationUnit cu = StaticJavaParser.parse(f);
         List<ForEachStmt> loops = cu.findAll(ForEachStmt.class);
         if (loops.isEmpty()) return false;
 
         LexicalPreservingPrinter.setup(cu);
         AtomicInteger seq = new AtomicInteger();
+        int rewritten = 0;
 
         // deepest-last: replace inner loops before their enclosing ones
         Collections.reverse(loops);
@@ -88,7 +91,8 @@ public class RewriteForeach {
             String mod = fin ? "final " : "";
             int id = seq.getAndIncrement();
 
-            boolean isArray = decideArray(fe, vd.getType());
+            Boolean isArray = decideArray(fe);
+            if (isArray == null) continue;
             String repl;
             if (isArray) {
                 String a = "$arr" + id, j = "$i" + id;
@@ -106,8 +110,10 @@ public class RewriteForeach {
             BlockStmt newBlock = StaticJavaParser.parseBlock(repl);
             fe.replace(newBlock);
             loopsRewritten++;
+            rewritten++;
         }
 
+        if (rewritten == 0) return false;
         Files.write(f, LexicalPreservingPrinter.print(cu).getBytes("UTF-8"));
         return true;
     }
@@ -133,15 +139,15 @@ public class RewriteForeach {
         return body.toString();
     }
 
-    @SuppressWarnings("unused")
-    static boolean decideArray(ForEachStmt fe, Type elemType) {
+    static Boolean decideArray(ForEachStmt fe) {
         try {
             ResolvedType rt = fe.getIterable().calculateResolvedType();
             return rt.isArray();
-        } catch (Throwable ex) {
+        } catch (RuntimeException ex) {
             resolveFails++;
-            // fallback: a primitive element type can only come from a primitive array
-            return elemType instanceof PrimitiveType;
+            System.out.println("UNRESOLVED_FOREACH " + currentFile + ":" + fe.getBegin().orElse(null)
+                    + " iterable=" + fe.getIterable() + " (left unchanged)");
+            return null;
         }
     }
 }

@@ -152,7 +152,9 @@ python3 tools/int2hex.py out/final-vf --report report.csv       # CSV for manual
 Vineflower sometimes emits Java 5 enhanced `for` loops for Java 1.4 bytecode.
 `RewriteForeach` (javaparser + symbol-solver, bundled jars in the dir) rewrites
 selected source files to indexed array loops or `Iterator` loops. It edits the files
-in place; recompile the result and review unresolved type fallbacks before use.
+in place; loops whose iterable type cannot be resolved are reported and left unchanged.
+Recompile the result before use: removing `for-each` syntax can expose other decompiler
+errors, including implicit unboxing and raw collection element types.
 
 ```sh
 java -cp "tools/foreach1_4/*:tools/foreach1_4" RewriteForeach final.jar libs path/to/File.java
