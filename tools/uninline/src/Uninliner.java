@@ -340,7 +340,14 @@ public class Uninliner {
         return labels;
     }
 
-    // T1: value unique among accessible (self|public) meaningful constants in cn's closure, past floor.
+    // T1: value unique among source-accessible constants in cn's closure, past floor.
+    // A public field inherited from a package-private interface is visible through
+    // the public child, but emitting DeclaringInterface.FIELD from another package
+    // is illegal Java. Keep the literal unless the declaring owner itself is usable.
+    static boolean samePackage(String a, String b) {
+        return a.substring(0, a.lastIndexOf('/') + 1).equals(b.substring(0, b.lastIndexOf('/') + 1));
+    }
+
     static Map<String, Ref> closureMap(String cn) {
         Map<String, Set<Ref>> buck = new HashMap<>();
         Set<String> seen=new HashSet<>(); Deque<String> st=new ArrayDeque<>(); st.push(cn);
@@ -348,7 +355,7 @@ public class Uninliner {
             String c=st.pop(); if(c==null||!seen.add(c)) continue;
             CInfo ci=index.get(c); if(ci==null) continue; boolean self=c.equals(cn);
             for(FConst f: ci.consts){
-                if(!(self||f.pub)||!meaningful(f.name)) continue;
+                if(!(self || (f.pub && (ci.pub || samePackage(cn, c)))) || !meaningful(f.name)) continue;
                 String key=constKey(f.desc,f.val); if(key==null) continue;
                 if((key.startsWith("i:")||key.startsWith("j:"))){
                     long v=Long.parseLong(key.substring(2)); if(Math.abs(v)<floor) continue;

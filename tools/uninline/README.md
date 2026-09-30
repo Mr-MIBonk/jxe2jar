@@ -62,6 +62,9 @@ $U audit    out/final.jar                       # type-ambiguity / jsr / utf-8 a
 - **Names are heuristic** - equal values can belong to different domains. `RefineResolve`
   reverts some doubtful matches and records them in `doubtful.tsv`; the value check
   cannot prove that a recovered name is semantically correct.
+- T1 only emits an inherited constant when its declaring class is accessible from
+  the consuming package. An inherited public field in a package-private interface
+  can otherwise decompile to an illegal `Hidden.FIELD` reference.
 - **Decompile-only** - a `getstatic` can trigger class init, so the jar is a reading aid, not
   runnable bytecode.
 - Resource IDs inside an `int[]` passed to `setBitmaps(int[])` or `setTextIds(int[])`
