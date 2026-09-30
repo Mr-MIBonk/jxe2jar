@@ -107,6 +107,14 @@ instead of a wall of magic numbers.
    python3 tools/nav_index.py         out/final.jar out/nav            # who-uses / what-is-N index
    ```
 
+7. **Check compilation and try compiler-gated CFR fallbacks:**
+   ```
+   python3 tools/recompile_check.py out/final-vf --jar out/final.jar --jcl libs/jcl/<FW>/jcl.jar --json-report out/compile.json
+   python3 tools/cfr_compile_fallback.py out/final-vf out/final.jar out/compile.json --jcl libs/jcl/<FW>/jcl.jar --apply
+   ```
+   CFR replaces a failed Vineflower source file only if its output compiles in isolation.
+   Re-run the compile check afterward; neither decompiler guarantees a complete build.
+
 The output is readable Java with inline nested classes, `throws` clauses, generics, symbolic
 constant references, and hex bitmasks.
 
@@ -116,8 +124,8 @@ constant references, and hex bitmasks.
 > - **step 4 `VF_JCL`** - resolves against the firmware's own CDC JCL ([`libs/jcl/`](libs/jcl/README.md))
 >   instead of a generic SE8 rt.jar, so `@Override`/generics/overloads bind to the real API.
 >
-> Both are safe to omit (you still get valid Java); they just make the result more complete and
-> accurate. For a quick one-off jxe with no firmware context, run just steps 1, 3, 5-6.
+> Both can be omitted for a quick decompile, but firmware context makes the result more complete
+> and accurate. For a one-off jxe, run steps 1, 3-6 before the optional compilation check.
 
 ## Constant un-inlining (ASM) - recover inlined `static final` names
 

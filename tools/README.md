@@ -22,6 +22,7 @@ flowchart LR
 | [`vineflower.sh`](#vineflowersh) | driver | primary decompiler (VF 1.12.0, `jad` renamer, JDK8 runtime) |
 | [`cfr.sh`](#cfrsh) | driver | alternate decompiler (CFR 0.152) for cross-referencing |
 | [`decompile_fallback.py`](#decompile_fallbackpy) | repair | re-decompile VF stubs with CFR |
+| [`cfr_compile_fallback.py`](#cfr_compile_fallbackpy) | repair | replace failed VF files only when CFR source passes javac |
 | [`fix_vf_artifacts.py`](#fix_vf_artifactspy) | repair | fix remaining VF rendering errors (keywords, class literals, casts) |
 | [`int2hex.py`](#int2hexpy) | repair | decimal bitmasks/flags -> hex |
 | [`foreach1_4/`](#foreach1_4) | repair | enhanced for-each -> Java 1.4 loops (javaparser) |
@@ -124,6 +125,18 @@ python3 tools/decompile_fallback.py out/final-vf out/final.jar --dry-run   # lis
 python3 tools/decompile_fallback.py out/final-vf out/final.jar             # re-decompile with CFR
 ```
 
+### `cfr_compile_fallback.py`
+For source files that fail the compile check, try CFR on the same classfile. Each CFR result
+is compiled on its own against the original JAR; only passing files are eligible for replacement.
+Use the firmware JCL and `--source 1.4` for runtime-targeted output. A Java 8 gate is useful for
+isolating decompiler errors, but does not prove that output runs on the firmware.
+
+```sh
+python3 tools/recompile_check.py out/final-vf --jar out/final.jar --json-report out/compile.json
+python3 tools/cfr_compile_fallback.py out/final-vf out/final.jar out/compile.json
+python3 tools/cfr_compile_fallback.py out/final-vf out/final.jar out/compile.json --apply
+```
+
 ### `fix_vf_artifacts.py`
 The converter now preserves `ACC_SYNTHETIC` on captured `this$N` and `val$...` fields, so
 Vineflower reconstructs anonymous captures from bytecode metadata without source rewriting.
@@ -201,6 +214,7 @@ bytecode scan still catches forbidden *classes* (`StringBuilder`/`Enum`/`Iterabl
 python3 tools/recompile_check.py out/final-vf
 python3 tools/recompile_check.py out/final-vf --jcl libs/jcl/MHI2Q_US_AUG22_P5087_MU1316/jcl.jar
 ```
+`--json-report PATH` also writes per-file diagnostics for compiler-gated fallback tools.
 
 **`javap` trap** (why trust `--jcl`, not `javap`): `javap -classpath jcl.jar java.lang.Class`
 still prints the **JDK8** class (`getSimpleName` present, StringBuilder-based body) because

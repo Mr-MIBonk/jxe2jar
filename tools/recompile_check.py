@@ -53,7 +53,7 @@ Usage:
     --limit N         cap number of files (for sampling a huge tree)
     --show K          print up to K example files per artifact category (default: 5)
 """
-import argparse, os, re, subprocess, sys, tempfile
+import argparse, json, os, re, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)  # jxe2jar/
@@ -120,6 +120,7 @@ def main():
     ap.add_argument("--batch", type=int, default=300)
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--show", type=int, default=5)
+    ap.add_argument("--json-report", help="write machine-readable per-file diagnostics")
     a = ap.parse_args()
 
     cp = a.jar
@@ -205,6 +206,13 @@ def main():
             print("      %s" % line.split(": error: ")[-1][:120])
         if len(items) > a.show:
             print("    ... +%d more" % (len(items) - a.show))
+    if a.json_report:
+        with open(a.json_report, "w") as report:
+            json.dump({"files": len(files), "reported_failures": {
+                f: {"category": cat, "first_error": line, "hint": hint}
+                for f, (cat, line, hint) in fail.items()
+            }, "forbidden_runtime_classes": forbidden_hits}, report, indent=2)
+            report.write("\n")
     return 0 if (not fail and not forbidden_hits) else 1
 
 if __name__ == "__main__":
