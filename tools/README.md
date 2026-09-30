@@ -127,8 +127,10 @@ python3 tools/decompile_fallback.py out/final-vf out/final.jar             # re-
 ### `fix_vf_artifacts.py`
 When anonymous classes are inlined (the `EnclosingMethod` attribute enables this), Vineflower
 occasionally can't name a nested anonymous class's synthetic outer-`this` field and emits the
-placeholder `<unrepresentable>`; it also sometimes emits Java keywords as identifiers. This
-repairs both so the source compiles/reads cleanly.
+placeholder `<unrepresentable>`; it also sometimes emits Java keywords as identifiers,
+mistakes synthetic capture arguments for constructor arguments, or retains a `class$(String)`
+call without its helper. This repairs those shapes, including nested captures, by binding
+captured values through final locals and restoring class literals.
 
 ```sh
 python3 tools/fix_vf_artifacts.py out/final-vf            # report
